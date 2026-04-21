@@ -257,6 +257,56 @@ class MeetingController {
       });
     }
   }
+
+  async getMeetingHistory(req, res) {
+  try {
+    const meetings = await Meeting.find({ isActive: false })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    
+    res.json({ 
+      success: true, 
+      data: meetings.map(m => ({ 
+        meetingId: m.meetingId, 
+        meetingName: m.meetingName, 
+        createdBy: m.createdBy, 
+        createdAt: m.createdAt, 
+        duration: m.duration,
+        participantsCount: m.participants.length
+      })) 
+    });
+  } catch (error) {
+    console.error('Error getting meeting history:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get meeting history' 
+    });
+  }
+}
+
+// Get active meetings with participant count
+async getActiveMeetings(req, res) {
+  try {
+    const meetings = await Meeting.find({ isActive: true });
+    
+    res.json({ 
+      success: true, 
+      data: meetings.map(m => ({ 
+        meetingId: m.meetingId, 
+        meetingName: m.meetingName, 
+        createdBy: m.createdBy,
+        createdAt: m.createdAt,
+        activeParticipants: m.participants.filter(p => p.isActive).length 
+      })) 
+    });
+  } catch (error) {
+    console.error('Error getting active meetings:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get active meetings' 
+    });
+  }
+}
   
   async getActiveMeetings(req, res) {
     try {
