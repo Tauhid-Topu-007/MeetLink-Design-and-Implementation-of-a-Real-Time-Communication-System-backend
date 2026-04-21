@@ -11,7 +11,14 @@ const participantSchema = new mongoose.Schema({
 }, { _id: false });
 
 const meetingSchema = new mongoose.Schema({
-  meetingId: { type: String, required: true, unique: true, index: true },
+  meetingId: { 
+    type: String, 
+    required: true, 
+    unique: true, 
+    index: true,
+    uppercase: true,
+    match: /^[A-Z0-9]{6,12}$/
+  },
   meetingName: { type: String, required: true },
   password: { type: String, default: null },
   createdBy: { type: String, required: true },
@@ -30,23 +37,6 @@ const meetingSchema = new mongoose.Schema({
     muteOnEntry: { type: Boolean, default: false }
   }
 }, { timestamps: true });
-
-// Generate unique meeting ID
-meetingSchema.statics.generateUniqueMeetingId = async function() {
-  const { v4: uuidv4 } = require('uuid');
-  let meetingId, isUnique = false;
-  let attempts = 0;
-  const maxAttempts = 5;
-  
-  while (!isUnique && attempts < maxAttempts) {
-    meetingId = uuidv4().substr(0, 9).toUpperCase();
-    const existing = await this.findOne({ meetingId }).catch(() => null);
-    if (!existing) isUnique = true;
-    attempts++;
-  }
-  
-  return meetingId;
-};
 
 const Meeting = mongoose.model('Meeting', meetingSchema);
 module.exports = Meeting;
