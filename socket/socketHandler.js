@@ -10,12 +10,23 @@ module.exports = (io) => {
       if (!rooms.has(roomId)) rooms.set(roomId, new Map());
       
       const room = rooms.get(roomId);
-      const userInfo = { socketId: socket.id, userId: userId || socket.id, name: userName, isMicOn: true, isVideoOn: true, isCreator: room.size === 0 };
+      const userInfo = { 
+        socketId: socket.id, 
+        userId: userId || socket.id, 
+        name: userName, 
+        isMicOn: true, 
+        isVideoOn: true, 
+        isCreator: room.size === 0 
+      };
       room.set(socket.id, userInfo);
       
       io.to(roomId).emit('participants-update', Array.from(room.values()));
       socket.to(roomId).emit('user-joined', { userId: userInfo.userId, userName: userInfo.name });
-      socket.emit('room-joined', { roomId, participants: Array.from(room.values()).filter(p => p.socketId !== socket.id), isCreator: userInfo.isCreator });
+      socket.emit('room-joined', { 
+        roomId, 
+        participants: Array.from(room.values()).filter(p => p.socketId !== socket.id), 
+        isCreator: userInfo.isCreator 
+      });
       
       console.log(`👤 ${userName} joined room: ${roomId}`);
     });
@@ -24,8 +35,15 @@ module.exports = (io) => {
       io.to(userId).emit('receive-signal', { signal, userId: socket.id, userName: rooms.get(roomId)?.get(socket.id)?.name });
     });
     
+    // Handle text messages with deduplication
     socket.on('send-message', (message) => {
-      io.to(message.roomId).emit('chat-message', message);
+      socket.to(message.roomId).emit('chat-message', message);
+      // Don't broadcast back to sender
+    });
+    
+    // Handle file messages
+    socket.on('send-file', (fileMessage) => {
+      socket.to(fileMessage.roomId).emit('file-message', fileMessage);
     });
     
     socket.on('toggle-mic', ({ roomId, isOn }) => {
