@@ -5,6 +5,12 @@ module.exports = (io) => {
     console.log(`🔌 Client connected: ${socket.id}`);
     
     socket.on('join-room', ({ roomId, userName, userId }) => {
+      // Check if user already in room to prevent duplicate
+      if (rooms.has(roomId) && rooms.get(roomId).has(socket.id)) {
+        console.log(`User ${socket.id} already in room, skipping`);
+        return;
+      }
+      
       socket.join(roomId);
       
       if (!rooms.has(roomId)) rooms.set(roomId, new Map());
@@ -21,7 +27,7 @@ module.exports = (io) => {
       };
       room.set(socket.id, userInfo);
       
-      // Send current participants to the new user
+      // Send current participants to the new user (excluding self)
       const participantsList = Array.from(room.values()).map(p => ({
         userId: p.userId,
         name: p.name,
@@ -31,16 +37,19 @@ module.exports = (io) => {
         isActive: p.isActive
       }));
       
+      // Filter out self when sending to the new user
+      const otherParticipants = participantsList.filter(p => p.userId !== (userId || socket.id));
+      
       socket.emit('room-joined', { 
         roomId, 
-        participants: participantsList.filter(p => p.userId !== (userId || socket.id)),
+        participants: otherParticipants,
         isCreator: userInfo.isCreator 
       });
       
-      // Broadcast updated participants list to everyone in the room
+      // Broadcast updated participants list to everyone in the room (including self for others)
       io.to(roomId).emit('participants-update', participantsList);
       
-      // Notify others about new user
+      // Notify others about new user (not self)
       socket.to(roomId).emit('user-joined', { 
         userId: userInfo.userId, 
         userName: userInfo.name 
@@ -50,6 +59,8 @@ module.exports = (io) => {
     });
     
     socket.on('send-signal', ({ signal, userId, roomId }) => {
+      // Don't send signal to self
+      if (userId === socket.id) return;
       io.to(userId).emit('receive-signal', { 
         signal, 
         userId: socket.id, 
