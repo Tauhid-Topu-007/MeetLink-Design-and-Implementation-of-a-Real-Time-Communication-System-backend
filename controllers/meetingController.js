@@ -96,6 +96,7 @@ class MeetingController {
         });
       }
       
+      // No participant limit check - allow infinite participants
       const participantUserId = userId || `guest_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
       
       const existingParticipant = meeting.participants.find(p => p.userId === participantUserId && p.isActive);
@@ -128,6 +129,7 @@ class MeetingController {
     }
   }
   
+  // Rest of the controller methods remain the same...
   async getMeetingDetails(req, res) {
     try {
       const { meetingId } = req.params;
@@ -151,6 +153,7 @@ class MeetingController {
           createdAt: meeting.createdAt,
           isActive: meeting.isActive,
           activeParticipants: activeParticipants.length,
+          totalParticipants: meeting.participants.length,
           participants: activeParticipants.map(p => ({ 
             name: p.name, 
             joinedAt: p.joinedAt 
@@ -246,7 +249,8 @@ class MeetingController {
           meetingName: m.meetingName, 
           createdBy: m.createdBy, 
           createdAt: m.createdAt, 
-          duration: m.duration 
+          duration: m.duration,
+          participantsCount: m.participants.length
         })) 
       });
     } catch (error) {
@@ -257,56 +261,6 @@ class MeetingController {
       });
     }
   }
-
-  async getMeetingHistory(req, res) {
-  try {
-    const meetings = await Meeting.find({ isActive: false })
-      .sort({ createdAt: -1 })
-      .limit(50);
-    
-    res.json({ 
-      success: true, 
-      data: meetings.map(m => ({ 
-        meetingId: m.meetingId, 
-        meetingName: m.meetingName, 
-        createdBy: m.createdBy, 
-        createdAt: m.createdAt, 
-        duration: m.duration,
-        participantsCount: m.participants.length
-      })) 
-    });
-  } catch (error) {
-    console.error('Error getting meeting history:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to get meeting history' 
-    });
-  }
-}
-
-// Get active meetings with participant count
-async getActiveMeetings(req, res) {
-  try {
-    const meetings = await Meeting.find({ isActive: true });
-    
-    res.json({ 
-      success: true, 
-      data: meetings.map(m => ({ 
-        meetingId: m.meetingId, 
-        meetingName: m.meetingName, 
-        createdBy: m.createdBy,
-        createdAt: m.createdAt,
-        activeParticipants: m.participants.filter(p => p.isActive).length 
-      })) 
-    });
-  } catch (error) {
-    console.error('Error getting active meetings:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to get active meetings' 
-    });
-  }
-}
   
   async getActiveMeetings(req, res) {
     try {
@@ -314,15 +268,13 @@ async getActiveMeetings(req, res) {
       
       res.json({ 
         success: true, 
-        data: { 
-          count: meetings.length, 
-          meetings: meetings.map(m => ({ 
-            meetingId: m.meetingId, 
-            meetingName: m.meetingName, 
-            createdBy: m.createdBy, 
-            activeParticipants: m.participants.filter(p => p.isActive).length 
-          })) 
-        } 
+        data: meetings.map(m => ({ 
+          meetingId: m.meetingId, 
+          meetingName: m.meetingName, 
+          createdBy: m.createdBy, 
+          createdAt: m.createdAt,
+          activeParticipants: m.participants.filter(p => p.isActive).length 
+        })) 
       });
     } catch (error) {
       console.error('Error getting active meetings:', error);

@@ -11,37 +11,56 @@ module.exports = (io) => {
       
       const room = rooms.get(roomId);
       const userInfo = { 
-        socketId: socket.id, 
+        id: socket.id,
         userId: userId || socket.id, 
         name: userName, 
         isMicOn: true, 
         isVideoOn: true, 
-        isCreator: room.size === 0 
+        isCreator: room.size === 0,
+        isActive: true
       };
       room.set(socket.id, userInfo);
       
-      io.to(roomId).emit('participants-update', Array.from(room.values()));
-      socket.to(roomId).emit('user-joined', { userId: userInfo.userId, userName: userInfo.name });
+      // Send current participants to the new user
+      const participantsList = Array.from(room.values()).map(p => ({
+        userId: p.userId,
+        name: p.name,
+        isMicOn: p.isMicOn,
+        isVideoOn: p.isVideoOn,
+        isCreator: p.isCreator,
+        isActive: p.isActive
+      }));
+      
       socket.emit('room-joined', { 
         roomId, 
-        participants: Array.from(room.values()).filter(p => p.socketId !== socket.id), 
+        participants: participantsList.filter(p => p.userId !== (userId || socket.id)),
         isCreator: userInfo.isCreator 
       });
       
-      console.log(`👤 ${userName} joined room: ${roomId}`);
+      // Broadcast updated participants list to everyone in the room
+      io.to(roomId).emit('participants-update', participantsList);
+      
+      // Notify others about new user
+      socket.to(roomId).emit('user-joined', { 
+        userId: userInfo.userId, 
+        userName: userInfo.name 
+      });
+      
+      console.log(`👤 ${userName} joined room: ${roomId} (Total: ${room.size})`);
     });
     
     socket.on('send-signal', ({ signal, userId, roomId }) => {
-      io.to(userId).emit('receive-signal', { signal, userId: socket.id, userName: rooms.get(roomId)?.get(socket.id)?.name });
+      io.to(userId).emit('receive-signal', { 
+        signal, 
+        userId: socket.id, 
+        userName: rooms.get(roomId)?.get(socket.id)?.name 
+      });
     });
     
-    // Handle text messages with deduplication
     socket.on('send-message', (message) => {
       socket.to(message.roomId).emit('chat-message', message);
-      // Don't broadcast back to sender
     });
     
-    // Handle file messages
     socket.on('send-file', (fileMessage) => {
       socket.to(fileMessage.roomId).emit('file-message', fileMessage);
     });
@@ -49,29 +68,87 @@ module.exports = (io) => {
     socket.on('toggle-mic', ({ roomId, isOn }) => {
       const room = rooms.get(roomId);
       if (room?.has(socket.id)) {
-        room.get(socket.id).isMicOn = isOn;
-        io.to(roomId).emit('participants-update', Array.from(room.values()));
+        const user = room.get(socket.id);
+        user.isMicOn = isOn;
+        room.set(socket.id, user);
+        
+        const participantsList = Array.from(room.values()).map(p => ({
+          userId: p.userId,
+          name: p.name,
+          isMicOn: p.isMicOn,
+          isVideoOn: p.isVideoOn,
+          isCreator: p.isCreator,
+          isActive: p.isActive
+        }));
+        io.to(roomId).emit('participants-update', participantsList);
       }
     });
     
     socket.on('toggle-video', ({ roomId, isOn }) => {
       const room = rooms.get(roomId);
       if (room?.has(socket.id)) {
-        room.get(socket.id).isVideoOn = isOn;
-        io.to(roomId).emit('participants-update', Array.from(room.values()));
+        const user = room.get(socket.id);
+        user.isVideoOn = isOn;
+        room.set(socket.id, user);
+        
+        const participantsList = Array.from(room.values()).map(p => ({
+          userId: p.userId,
+          name: p.name,
+          isMicOn: p.isMicOn,
+          isVideoOn: p.isVideoOn,
+          isCreator: p.isCreator,
+          isActive: p.isActive
+        }));
+        io.to(roomId).emit('participants-update', participantsList);
+      }
+    });
+    
+    socket.on('leave-room', ({ roomId }) => {
+      const room = rooms.get(roomId);
+      if (room?.has(socket.id)) {
+        room.delete(socket.id);
+        
+        if (room.size === 0) {
+          rooms.delete(roomId);
+        } else {
+          const participantsList = Array.from(room.values()).map(p => ({
+            userId: p.userId,
+            name: p.name,
+            isMicOn: p.isMicOn,
+            isVideoOn: p.isVideoOn,
+            isCreator: p.isCreator,
+            isActive: p.isActive
+          }));
+          io.to(roomId).emit('participants-update', participantsList);
+          socket.to(roomId).emit('user-left', { userId: socket.id });
+        }
       }
     });
     
     socket.on('disconnect', () => {
+      console.log(`🔌 Client disconnected: ${socket.id}`);
+      
       for (const [roomId, room] of rooms.entries()) {
         if (room.has(socket.id)) {
           room.delete(socket.id);
-          if (room.size === 0) rooms.delete(roomId);
-          else io.to(roomId).emit('participants-update', Array.from(room.values()));
+          
+          if (room.size === 0) {
+            rooms.delete(roomId);
+          } else {
+            const participantsList = Array.from(room.values()).map(p => ({
+              userId: p.userId,
+              name: p.name,
+              isMicOn: p.isMicOn,
+              isVideoOn: p.isVideoOn,
+              isCreator: p.isCreator,
+              isActive: p.isActive
+            }));
+            io.to(roomId).emit('participants-update', participantsList);
+            socket.to(roomId).emit('user-left', { userId: socket.id });
+          }
           break;
         }
       }
-      console.log(`🔌 Client disconnected: ${socket.id}`);
     });
   });
 };
