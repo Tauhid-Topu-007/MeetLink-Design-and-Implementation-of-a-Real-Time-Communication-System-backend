@@ -6,11 +6,13 @@ require('dotenv').config();
 
 const meetingRoutes = require('./routes/meetingRoutes');
 const userRoutes = require('./routes/userRoutes');
+const authRoutes = require('./routes/authRoutes');
 const socketHandler = require('./socket/socketHandler');
 const connectDB = require('./config/database');
 
 const app = express();
 const server = http.createServer(app);
+const mongoose = require('mongoose');
 
 const io = socketIo(server, {
   cors: {
@@ -36,10 +38,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Connect to Database (don't wait for it to start the server)
+// Connect to Database
 connectDB();
 
-// Routes
+// Routes - IMPORTANT: Order matters
+app.use('/api/auth', authRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/users', userRoutes);
 
@@ -60,6 +63,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
     endpoints: {
+      auth: '/api/auth',
       meetings: '/api/meetings',
       users: '/api/users',
       health: '/health'
@@ -88,11 +92,11 @@ app.use((err, req, res, next) => {
 // Socket.io handler
 socketHandler(io);
 
-const mongoose = require('mongoose');
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📡 WebSocket server ready`);
   console.log(`🌐 Client URL: ${process.env.CLIENT_URL || 'http://localhost:3000'}`);
-  console.log(`💾 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}\n`);
+  console.log(`💾 MongoDB Status: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
+  console.log(`🔐 Auth routes enabled at /api/auth\n`);
 });
