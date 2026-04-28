@@ -2,160 +2,136 @@ const rooms = new Map();
 
 module.exports = (io) => {
   io.on('connection', (socket) => {
-    console.log(`🔌 Client connected: ${socket.id}`);
+    console.log(`✅ Client connected: ${socket.id}`);
     
-    socket.on('join-room', ({ roomId, userName, userId }) => {
-      // Check if user already in room to prevent duplicate
-      if (rooms.has(roomId) && rooms.get(roomId).has(socket.id)) {
-        console.log(`User ${socket.id} already in room, skipping`);
-        return;
+    socket.on('join-room', ({ roomId, userName }) => {
+      // Create room if doesn't exist
+      if (!rooms.has(roomId)) {
+        rooms.set(roomId, new Map());
       }
+      
+      const room = rooms.get(roomId);
+      
+      // Remove any existing connection with same name
+      let existingSocketId = null;
+      for (const [sid, user] of room.entries()) {
+        if (user.name === userName) {
+          existingSocketId = sid;
+          break;
+        }
+      }
+      
+      if (existingSocketId) {
+        console.log(`⚠️ Removing existing connection for ${userName}`);
+        room.delete(existingSocketId);
+        io.to(roomId).emit('user-disconnected', { userId: existingSocketId });
+      }
+      
+      // Add new user
+      room.set(socket.id, {
+        id: socket.id,
+        name: userName,
+        roomId: roomId
+      });
       
       socket.join(roomId);
       
-      if (!rooms.has(roomId)) rooms.set(roomId, new Map());
+      console.log(`📢 ${userName} (${socket.id}) joined room ${roomId}`);
+      console.log(`👥 Room ${roomId} has ${room.size} participants`);
       
-      const room = rooms.get(roomId);
-      const userInfo = { 
-        id: socket.id,
-        userId: userId || socket.id, 
-        name: userName, 
-        isMicOn: true, 
-        isVideoOn: true, 
-        isCreator: room.size === 0,
-        isActive: true
-      };
-      room.set(socket.id, userInfo);
-      
-      // Send current participants to the new user (excluding self)
-      const participantsList = Array.from(room.values()).map(p => ({
-        userId: p.userId,
-        name: p.name,
-        isMicOn: p.isMicOn,
-        isVideoOn: p.isVideoOn,
-        isCreator: p.isCreator,
-        isActive: p.isActive
+      // Get all participants in room
+      const participants = Array.from(room.values()).map(p => ({
+        userId: p.id,
+        name: p.name
       }));
       
-      // Filter out self when sending to the new user
-      const otherParticipants = participantsList.filter(p => p.userId !== (userId || socket.id));
+      // Send participant list to all
+      io.to(roomId).emit('participants-list', participants);
       
-      socket.emit('room-joined', { 
-        roomId, 
-        participants: otherParticipants,
-        isCreator: userInfo.isCreator 
-      });
+      // Send existing participants to new user
+      const otherParticipants = participants.filter(p => p.userId !== socket.id);
+      if (otherParticipants.length > 0) {
+        console.log(`📋 Sending existing users to ${userName}:`, otherParticipants);
+        socket.emit('existing-participants', { participants: otherParticipants });
+      }
       
-      // Broadcast updated participants list to everyone in the room (including self for others)
-      io.to(roomId).emit('participants-update', participantsList);
-      
-      // Notify others about new user (not self)
-      socket.to(roomId).emit('user-joined', { 
-        userId: userInfo.userId, 
-        userName: userInfo.name 
-      });
-      
-      console.log(`👤 ${userName} joined room: ${roomId} (Total: ${room.size})`);
-    });
-    
-    socket.on('send-signal', ({ signal, userId, roomId }) => {
-      // Don't send signal to self
-      if (userId === socket.id) return;
-      io.to(userId).emit('receive-signal', { 
-        signal, 
-        userId: socket.id, 
-        userName: rooms.get(roomId)?.get(socket.id)?.name 
+      // Notify others about new user
+      socket.broadcast.to(roomId).emit('user-joined', {
+        userId: socket.id,
+        userName: userName
       });
     });
     
+    // Handle WebRTC signaling
+    socket.on('webrtc-signal', ({ userId, signal }) => {
+      console.log(`📡 WebRTC signal from ${socket.id} to ${userId}`);
+      io.to(userId).emit('webrtc-signal', {
+        userId: socket.id,
+        signal: signal
+      });
+    });
+    
+    // Handle chat messages
     socket.on('send-message', (message) => {
-      socket.to(message.roomId).emit('chat-message', message);
+      io.to(message.roomId).emit('chat-message', message);
     });
     
+    // Handle file messages
     socket.on('send-file', (fileMessage) => {
-      socket.to(fileMessage.roomId).emit('file-message', fileMessage);
+      io.to(fileMessage.roomId).emit('file-message', fileMessage);
     });
     
-    socket.on('toggle-mic', ({ roomId, isOn }) => {
+    // Handle media toggles
+    socket.on('toggle-mic', ({ roomId, isOn, userName }) => {
       const room = rooms.get(roomId);
-      if (room?.has(socket.id)) {
-        const user = room.get(socket.id);
-        user.isMicOn = isOn;
-        room.set(socket.id, user);
-        
-        const participantsList = Array.from(room.values()).map(p => ({
-          userId: p.userId,
+      if (room) {
+        const participants = Array.from(room.values()).map(p => ({
+          userId: p.id,
           name: p.name,
-          isMicOn: p.isMicOn,
-          isVideoOn: p.isVideoOn,
-          isCreator: p.isCreator,
-          isActive: p.isActive
+          isMicOn: p.id === socket.id ? isOn : (p.isMicOn !== false),
+          isVideoOn: p.isVideoOn !== false
         }));
-        io.to(roomId).emit('participants-update', participantsList);
+        io.to(roomId).emit('participants-list', participants);
       }
     });
     
-    socket.on('toggle-video', ({ roomId, isOn }) => {
+    socket.on('toggle-video', ({ roomId, isOn, userName }) => {
       const room = rooms.get(roomId);
-      if (room?.has(socket.id)) {
-        const user = room.get(socket.id);
-        user.isVideoOn = isOn;
-        room.set(socket.id, user);
-        
-        const participantsList = Array.from(room.values()).map(p => ({
-          userId: p.userId,
+      if (room) {
+        const participants = Array.from(room.values()).map(p => ({
+          userId: p.id,
           name: p.name,
-          isMicOn: p.isMicOn,
-          isVideoOn: p.isVideoOn,
-          isCreator: p.isCreator,
-          isActive: p.isActive
+          isMicOn: p.isMicOn !== false,
+          isVideoOn: p.id === socket.id ? isOn : (p.isVideoOn !== false)
         }));
-        io.to(roomId).emit('participants-update', participantsList);
+        io.to(roomId).emit('participants-list', participants);
       }
     });
     
-    socket.on('leave-room', ({ roomId }) => {
-      const room = rooms.get(roomId);
-      if (room?.has(socket.id)) {
-        room.delete(socket.id);
-        
-        if (room.size === 0) {
-          rooms.delete(roomId);
-        } else {
-          const participantsList = Array.from(room.values()).map(p => ({
-            userId: p.userId,
-            name: p.name,
-            isMicOn: p.isMicOn,
-            isVideoOn: p.isVideoOn,
-            isCreator: p.isCreator,
-            isActive: p.isActive
-          }));
-          io.to(roomId).emit('participants-update', participantsList);
-          socket.to(roomId).emit('user-left', { userId: socket.id });
-        }
-      }
-    });
-    
+    // Handle disconnection
     socket.on('disconnect', () => {
-      console.log(`🔌 Client disconnected: ${socket.id}`);
+      console.log(`❌ Client disconnected: ${socket.id}`);
       
       for (const [roomId, room] of rooms.entries()) {
         if (room.has(socket.id)) {
+          const user = room.get(socket.id);
           room.delete(socket.id);
+          
+          console.log(`👋 ${user.name} left room ${roomId}`);
+          
+          // Get updated participants
+          const participants = Array.from(room.values()).map(p => ({
+            userId: p.id,
+            name: p.name
+          }));
+          
+          // Notify others
+          io.to(roomId).emit('participants-list', participants);
+          io.to(roomId).emit('user-disconnected', { userId: socket.id });
           
           if (room.size === 0) {
             rooms.delete(roomId);
-          } else {
-            const participantsList = Array.from(room.values()).map(p => ({
-              userId: p.userId,
-              name: p.name,
-              isMicOn: p.isMicOn,
-              isVideoOn: p.isVideoOn,
-              isCreator: p.isCreator,
-              isActive: p.isActive
-            }));
-            io.to(roomId).emit('participants-update', participantsList);
-            socket.to(roomId).emit('user-left', { userId: socket.id });
+            console.log(`🗑️ Room ${roomId} deleted`);
           }
           break;
         }
